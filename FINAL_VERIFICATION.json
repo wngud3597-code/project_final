@@ -1,0 +1,10 @@
+{
+  "folder_name": "LOCALHUB_FIXED_20260715",
+  "python_compile": "PASS",
+  "unit_tests": "PASS",
+  "tests_run": 10,
+  "zoneinfo_runtime_dependency": false,
+  "external_tzdata_required": false,
+  "kst": "UTC+09:00 fixed offset",
+  "forbidden_zoneinfo_references_in_python": []
+}

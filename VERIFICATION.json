@@ -1,0 +1,41 @@
+{
+  "project": "LocalHub 서울안내 Vue 3 통합본",
+  "generatedAt": "2026-07-15T06:29:33",
+  "data": {
+    "uploadedJsonFiles": 7,
+    "loadedRows": 6518,
+    "categoryCounts": {
+      "관광지": 783,
+      "문화시설": 566,
+      "축제공연행사": 201,
+      "여행코스": 51,
+      "레포츠": 126,
+      "숙박": 423,
+      "쇼핑": 4368
+    },
+    "allOriginalFieldsAvailableInDetail": true,
+    "sourceFilesCopiedWithoutContentModification": true
+  },
+  "checks": {
+    "pythonCompile": "PASS",
+    "backendUnitTests": "PASS (9 tests)",
+    "frontendLoaderSyntax": "PASS",
+    "frontendAppSyntax": "PASS",
+    "healthEndpoint": "PASS",
+    "statsEndpoint": "PASS",
+    "searchEndpoint": "PASS",
+    "mapEndpoint": "PASS",
+    "detailEndpoint": "PASS",
+    "staticHtml": "PASS",
+    "staticJavaScript": "PASS",
+    "weatherKeyNotPresentInFrontend": "PASS",
+    "weatherUsesBackendProxy": "PASS",
+    "weatherDemoFallback": "DISABLED"
+  },
+  "externalValidation": {
+    "kmaLiveRequest": "NOT EXECUTED in sandbox because outbound DNS/network is unavailable",
+    "vueAndLeafletCdn": "Syntax and fallback loader verified; live CDN retrieval requires the user's internet connection"
+  },
+  "windows_timezone_compatibility": "PASS - no external tzdata required",
+  "kst_implementation": "UTC+09:00 fixed offset"
+}

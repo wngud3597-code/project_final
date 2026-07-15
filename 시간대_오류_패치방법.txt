@@ -1,0 +1,13 @@
+LocalHub 시간대 오류 패치 방법
+
+오류:
+ZoneInfoNotFoundError: No time zone found with key Asia/Seoul
+
+적용:
+1. 기존 프로젝트 폴더를 닫습니다.
+2. 이 ZIP을 압축 해제합니다.
+3. backend/weather_service.py를 기존 동일 위치에 덮어씁니다.
+4. backend/tests/test_weather.py를 기존 동일 위치에 덮어씁니다.
+5. verify-project.cmd를 다시 실행합니다.
+
+이 패치는 외부 tzdata 설치 없이 UTC+9 한국시간을 사용합니다.
