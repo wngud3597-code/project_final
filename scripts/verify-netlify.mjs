@@ -31,7 +31,8 @@ const chatResponse = await call("/api/chat", "POST", {
 });
 const chat = JSON.parse(chatResponse.body);
 assert(chatResponse.statusCode === 200, "chat API failed");
-assert(chat.model === "netlify-rules-v1" && chat.places.length === 3, "chat result mismatch");
+assert(typeof chat.answer === "string" && chat.answer.length > 20, "chat answer missing");
+assert(["guided", "openai"].includes(chat.mode) && chat.places.length === 3, "chat result mismatch");
 
 console.log("PASS: Netlify API preflight");
 console.log(`PASS: tourism items ${health.loadedItems}`);

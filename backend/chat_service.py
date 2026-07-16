@@ -19,8 +19,8 @@ class TourismChatService:
     def __init__(self, env_path: Path, store: TourismStore, weather: WeatherService):
         env = load_env(env_path)
         self.api_key = env.get("OPENAI_API_KEY", "").strip()
-        self.model = env.get("OPENAI_MODEL", "gpt-5.6-terra").strip()
-        self.mode = env.get("CHAT_MODE", "rules").strip().lower()
+        self.model = env.get("OPENAI_MODEL", "gpt-5.6-luna").strip()
+        self.mode = env.get("CHAT_MODE", "auto").strip().lower()
         self.store = store
         self.weather = weather
 
@@ -174,8 +174,16 @@ class TourismChatService:
             "예보": result.get("forecast", [])[:4],
         }
 
+    def _safe_fallback(
+        self, message: str, history: list[dict[str, str]] | None, reason: str
+    ) -> dict[str, Any]:
+        result = self._rule_answer(message, history)
+        result["fallbackReason"] = reason
+        result["mode"] = "guided"
+        return result
+
     def ask(self, message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-        if self.mode != "openai" or not self.openai_configured:
+        if self.mode not in {"auto", "openai"} or not self.openai_configured:
             return self._rule_answer(message, history)
 
         candidates = self._candidates(message)
@@ -190,7 +198,8 @@ class TourismChatService:
         payload = {
             "model": self.model,
             "instructions": (
-                "당신은 LocalHub의 친절한 서울 관광 안내원입니다. 한국어로 간결하고 읽기 쉽게 답하세요. "
+                "당신은 LocalHub의 차분하고 배려 깊은 서울 관광 안내원입니다. 한국어로 간결하고 읽기 쉽게 답하세요. "
+                "주 사용자는 노년의 부모님 두 분이며 자녀가 동행한다고 가정하지 마세요. "
                 "반드시 제공된 관광지 후보만 구체적인 장소로 추천하고, 이름을 정확히 쓰세요. "
                 "사용자의 조건을 반영해 최대 3곳과 추천 이유를 제시하세요. 날씨 데이터가 있으면 복장·우산·실내외 동선을 조언하세요. "
                 "데이터에 없는 운영시간, 요금, 교통편을 지어내지 말고 확인이 필요하다고 밝히세요. "
@@ -199,6 +208,7 @@ class TourismChatService:
             ),
             "input": input_messages,
             "max_output_tokens": 700,
+            "store": False,
         }
         request = Request(
             "https://api.openai.com/v1/responses",
@@ -214,9 +224,17 @@ class TourismChatService:
                 detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message", "")
             except Exception:
                 detail = ""
-            raise ChatError(f"OpenAI API 오류 ({exc.code}): {detail or exc.reason}") from exc
+            return self._safe_fallback(
+                message,
+                history,
+                f"AI 연결 오류({exc.code})로 검증된 관광 데이터 안내를 사용했습니다.",
+            )
         except (URLError, TimeoutError) as exc:
-            raise ChatError(f"OpenAI API에 연결하지 못했습니다: {exc}") from exc
+            return self._safe_fallback(
+                message,
+                history,
+                "AI 연결이 원활하지 않아 검증된 관광 데이터 안내를 사용했습니다.",
+            )
 
         text = result.get("output_text", "")
         if not text:
@@ -227,5 +245,9 @@ class TourismChatService:
                 if part.get("type") == "output_text"
             )
         if not text:
-            raise ChatError("OpenAI API가 빈 응답을 반환했습니다.")
-        return {"answer": text, "model": self.model, "places": public_candidates}
+            return self._safe_fallback(
+                message,
+                history,
+                "AI가 답변을 만들지 못해 검증된 관광 데이터 안내를 사용했습니다.",
+            )
+        return {"answer": text, "model": self.model, "mode": "openai", "places": public_candidates}

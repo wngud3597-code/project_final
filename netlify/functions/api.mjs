@@ -15,6 +15,7 @@ const FIELD_LABELS = {
 };
 
 let cache;
+const weatherCache = new Map();
 function dataDirectory() {
   const candidates = [
     path.join(process.cwd(), "data"),
@@ -68,6 +69,8 @@ function publicItem(item, raw = false) {
 function response(statusCode, body) {
   return {statusCode, headers: {"Content-Type":"application/json; charset=utf-8", "Cache-Control":"no-store"}, body: JSON.stringify(body)};
 }
+const openAIConfigured = () => Boolean(String(process.env.OPENAI_API_KEY || "").trim());
+const openAIModel = () => String(process.env.OPENAI_MODEL || "gpt-5.6-luna").trim();
 function integer(value, fallback, min, max) {
   const parsed = Number.parseInt(value, 10); return Math.min(max, Math.max(min, Number.isFinite(parsed) ? parsed : fallback));
 }
@@ -118,7 +121,10 @@ function recommend(message, limit=3) {
     return [score,item];
   }).sort((a,b)=>b[0]-a[0] || String(a[1].title).localeCompare(String(b[1].title),"ko")).slice(0,limit).map(x=>x[1]);
 }
-function chat(message, history=[]) {
+function publicCandidates(choices) {
+  return choices.map(x=>({contentid:x.contentid,"이름":x.title,"유형":x.contentType,"자치구":x.district,"주소":x.fullAddress,"전화":x.tel}));
+}
+function ruleChat(message, history=[], extra={}) {
   const previous = history.filter(x=>x.role==="user").slice(-1).map(x=>x.content); const combined=[...previous,message].join(" ");
   const it=intent(combined), choices=recommend(combined), conditions=[...it.districts,...it.categories];
   if(it.indoor) conditions.push("실내 중심"); if(it.parent) conditions.push("부모님 이동 부담 고려"); if(it.family) conditions.push("가족 동행");
@@ -126,7 +132,52 @@ function chat(message, history=[]) {
   choices.forEach((item,index)=>lines.push(`${index+1}. ${item.title} — ${item.district}의 ${item.contentType}. 주소: ${item.fullAddress||"정보 미제공"} [장소ID:${item.contentid}]`));
   if(it.parent) lines.push("무장애 출입·엘리베이터·휴식 공간은 방문 전에 전화로 확인해 주세요.");
   lines.push("운영시간·휴무일·요금은 제공 데이터에 없어 방문 전 확인이 필요합니다.");
-  return {answer:lines.join("\n\n"), model:"netlify-rules-v1", places:choices.map(x=>({contentid:x.contentid,"이름":x.title,"유형":x.contentType,"자치구":x.district,"주소":x.fullAddress,"전화":x.tel}))};
+  return {answer:lines.join("\n\n"), model:"localhub-guided-v2", mode:"guided", places:publicCandidates(choices), ...extra};
+}
+
+function outputText(result) {
+  if (typeof result?.output_text === "string" && result.output_text.trim()) return result.output_text.trim();
+  return (result?.output || []).flatMap(item=>item?.content || []).filter(part=>part?.type==="output_text").map(part=>part.text || "").join("\n").trim();
+}
+
+async function openAIChat(message, history=[]) {
+  if (!openAIConfigured()) return ruleChat(message,history,{fallbackReason:"OpenAI가 설정되지 않아 검증된 관광 데이터 안내를 사용했습니다."});
+  const previous=history.filter(row=>["user","assistant"].includes(row?.role)&&typeof row?.content==="string").slice(-6).map(row=>({role:row.role,content:row.content.slice(0,1500)}));
+  const combined=[...previous.filter(row=>row.role==="user").slice(-1).map(row=>row.content),message].join(" ");
+  const choices=recommend(combined,6), places=publicCandidates(choices);
+  let weatherContext=null;
+  const location=choices.find(item=>item.hasCoordinates);
+  if(location&&process.env.KMA_SERVICE_KEY){
+    try{const value=await weather(location.latitude,location.longitude);weatherContext={기준장소:location.title,관측시각:value.observedAt,현재:value.current,예보:value.forecast?.slice(0,4)||[]};}catch(error){console.warn("Chat weather context unavailable",error.message);}
+  }
+  const context={서비스목적:"노년의 부모님 두 분이 자녀의 동행 없이도 편안하고 안전하게 서울을 여행하도록 돕기",관광지후보:places,날씨:weatherContext};
+  const payload={
+    model:openAIModel(),
+    instructions:[
+      "당신은 LocalHub의 차분하고 배려 깊은 서울 여행 안내원입니다.",
+      "주 사용자는 노년의 부모님 두 분이며 자녀가 동행한다고 가정하지 마세요.",
+      "존댓말과 짧고 쉬운 문장을 사용하고 한 번에 최대 3곳만 추천하세요.",
+      "구체적인 장소는 제공된 관광지 후보에서만 고르고 이름과 장소ID를 정확히 사용하세요.",
+      "날씨가 있으면 우산, 복장, 미끄럼, 더위·추위, 중간 휴식처럼 실용적인 주의사항을 덧붙이세요.",
+      "무장애 출입, 엘리베이터, 운영시간, 요금, 교통편이 데이터에 없으면 추측하지 말고 방문 전 전화 확인을 권하세요.",
+      "각 추천 마지막에 반드시 [장소ID:실제 contentid]를 붙이세요.",
+      `현재 LocalHub 데이터: ${JSON.stringify(context)}`
+    ].join("\n"),
+    input:[...previous,{role:"user",content:message}],
+    max_output_tokens:700,
+    store:false
+  };
+  try{
+    const apiResponse=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify(payload),signal:AbortSignal.timeout(35000)});
+    const result=await apiResponse.json().catch(()=>({}));
+    if(!apiResponse.ok) throw new Error(`OpenAI HTTP ${apiResponse.status}: ${result?.error?.message || "요청 실패"}`);
+    const answer=outputText(result);
+    if(!answer) throw new Error("OpenAI가 빈 답변을 반환했습니다.");
+    return {answer,model:openAIModel(),mode:"openai",places,weatherUsed:Boolean(weatherContext)};
+  }catch(error){
+    console.error("OpenAI fallback",error.message);
+    return ruleChat(message,history,{fallbackReason:"AI 연결이 원활하지 않아 검증된 관광 데이터 안내로 답변했습니다."});
+  }
 }
 
 function grid(latitude, longitude) {
@@ -151,7 +202,7 @@ async function kmaCall(kind, nx, ny) {
   for(const base of candidates) {
     const params=new URLSearchParams({serviceKey:decodeURIComponent(process.env.KMA_SERVICE_KEY||""),pageNo:"1",numOfRows:"1000",dataType:"JSON",base_date:base.date,base_time:base.time,nx:String(nx),ny:String(ny)});
     try {
-      const res=await fetch(`https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/${endpoint}?${params}`,{headers:{Accept:"application/json"}});
+      const res=await fetch(`https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/${endpoint}?${params}`,{headers:{Accept:"application/json"},signal:AbortSignal.timeout(12000)});
       const payload=await res.json(), header=payload?.response?.header;
       if(!res.ok || String(header?.resultCode)!=="00") throw new Error(header?.resultMsg||`HTTP ${res.status}`);
       const values=payload?.response?.body?.items?.item;
@@ -166,7 +217,10 @@ const num=value=>value==null||value===""?null:Number(value);
 const wind=value=>value==null?"정보 없음":["북","북동","동","남동","남","남서","서","북서"][Math.floor((Number(value)+22.5)/45)%8];
 async function weather(latitude,longitude) {
   if(!process.env.KMA_SERVICE_KEY) throw new Error("Netlify 환경변수 KMA_SERVICE_KEY를 설정해 주세요.");
-  const {nx,ny}=grid(latitude,longitude), currentResult=await kmaCall("current",nx,ny);
+  if(latitude<33||latitude>39||longitude<124||longitude>132) throw new Error("대한민국 범위의 유효한 좌표가 필요합니다.");
+  const {nx,ny}=grid(latitude,longitude), cacheKey=`${nx},${ny}`, cached=weatherCache.get(cacheKey);
+  if(cached&&Date.now()-cached.savedAt<10*60*1000) return cached.value;
+  const currentResult=await kmaCall("current",nx,ny);
   const values=Object.fromEntries(currentResult.values.map(x=>[String(x.category),x.obsrValue]));
   const current={temperature:num(values.T1H),humidity:num(values.REH),rain1h:num(values.RN1),precipitationTypeCode:String(values.PTY||"0"),description:PTY[String(values.PTY||"0")]||"날씨 정보",windSpeed:num(values.WSD),windDirection:num(values.VEC),windDirectionLabel:wind(values.VEC),rawCategories:values};
   let forecasts=[], forecastError=null;
@@ -179,7 +233,9 @@ async function weather(latitude,longitude) {
   if(current.precipitationTypeCode!=="0"||(current.rain1h||0)>0) advice="비나 눈이 관측됩니다. 미끄럽지 않은 신발과 우산을 준비하세요.";
   else if(current.temperature>=30) advice="매우 덥습니다. 물을 자주 마시고 그늘에서 충분히 쉬세요.";
   else if(current.temperature<=5) advice="기온이 낮습니다. 보온이 잘 되는 겉옷을 준비하세요.";
-  return {source:"기상청 단기예보 조회서비스",isLive:true,observedAt:`${currentResult.base.date} ${currentResult.base.time}`,grid:{nx,ny},current,forecast:forecasts,forecastError,advice};
+  const result={source:"기상청 단기예보 조회서비스",isLive:true,observedAt:`${currentResult.base.date} ${currentResult.base.time}`,grid:{nx,ny},current,forecast:forecasts,forecastError,advice};
+  weatherCache.set(cacheKey,{savedAt:Date.now(),value:result});
+  return result;
 }
 
 export async function handler(event) {
@@ -188,10 +244,10 @@ export async function handler(event) {
     if (event.httpMethod === "POST" && suffix === "chat") {
       const body=JSON.parse(event.body||"{}"); const message=String(body.message||"").trim();
       if(!message || message.length>1000) return response(400,{error:"질문은 1~1,000자로 입력해 주세요."});
-      return response(200,chat(message,Array.isArray(body.history)?body.history:[]));
+      return response(200,await openAIChat(message,Array.isArray(body.history)?body.history:[]));
     }
     if(event.httpMethod!=="GET") return response(405,{error:"지원하지 않는 요청입니다."});
-    if(suffix==="health") return response(200,{status:"ok",loadedItems:loadStore().items.length,weatherConfigured:Boolean(process.env.KMA_SERVICE_KEY),chatConfigured:true,chatMode:"free-rules-netlify"});
+    if(suffix==="health") return response(200,{status:"ok",loadedItems:loadStore().items.length,weatherConfigured:Boolean(process.env.KMA_SERVICE_KEY),chatConfigured:true,openAIConfigured:openAIConfigured(),chatMode:openAIConfigured()?"openai":"guided-fallback",openAIModel:openAIConfigured()?openAIModel():null});
     if(suffix==="stats") return response(200,stats());
     if(suffix==="search") {
       let rows=filterItems(url.searchParams); const sort=url.searchParams.get("sort")||"title";

@@ -114,7 +114,9 @@ class Handler(BaseHTTPRequestHandler):
                         "loadedItems": len(STORE.items),
                         "weatherConfigured": WEATHER.configured,
                         "chatConfigured": CHAT.configured,
-                        "chatMode": "openai" if CHAT.mode == "openai" and CHAT.openai_configured else "free-rules",
+                        "openAIConfigured": CHAT.openai_configured,
+                        "chatMode": "openai" if CHAT.mode in {"auto", "openai"} and CHAT.openai_configured else "guided-fallback",
+                        "openAIModel": CHAT.model if CHAT.openai_configured else None,
                         "vue": "Vue 3 global production build loaded by frontend loader",
                     },
                 )

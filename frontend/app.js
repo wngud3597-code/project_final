@@ -29,6 +29,7 @@ window.startLocalHub = function startLocalHub() {
         busy: false,
         error: '',
         stats: null,
+        health: null,
         filters: {
           q: '',
           category: '전체',
@@ -66,9 +67,9 @@ window.startLocalHub = function startLocalHub() {
         chatBusy: false,
         chatError: '',
         chatMessages: [
-          { role: 'assistant', content: '안녕하세요! 원하는 지역, 취향, 일정이나 날씨 걱정을 말씀해 주세요. LocalHub 데이터에서 어울리는 서울 관광지를 찾아드릴게요.', places: [] }
+          { role: 'assistant', content: '안녕하세요. 두 분이 편안하게 다녀오실 서울 나들이를 함께 찾아드릴게요. 가고 싶은 지역, 걷는 시간, 실내·야외 취향이나 날씨 걱정을 편하게 말씀해 주세요.', places: [], mode: 'welcome' }
         ],
-        chatSuggestions: ['비 오는 날 실내 추천', '부모님과 편한 여행', '아이와 문화 체험']
+        chatSuggestions: ['많이 걷지 않는 종로 나들이', '비 오는 날 실내 여행', '두 분이 쉬엄쉬엄 볼 수 있는 곳']
       };
     },
 
@@ -152,8 +153,17 @@ window.startLocalHub = function startLocalHub() {
           const payload = await response.json();
           if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
           const ids = new Set(Array.from(payload.answer.matchAll(/\[장소ID:([^\]]+)\]/g), match => match[1]));
-          const places = (payload.places || []).filter(place => ids.has(String(place.contentid))).slice(0, 3);
-          this.chatMessages.push({ role: 'assistant', content: payload.answer, places });
+          const availablePlaces = payload.places || [];
+          const places = (ids.size
+            ? availablePlaces.filter(place => ids.has(String(place.contentid)))
+            : availablePlaces).slice(0, 3);
+          this.chatMessages.push({
+            role: 'assistant',
+            content: payload.answer,
+            places,
+            mode: payload.mode,
+            fallbackReason: payload.fallbackReason || ''
+          });
         } catch (error) {
           this.chatError = error.message;
         } finally {
@@ -180,11 +190,12 @@ window.startLocalHub = function startLocalHub() {
       async initialize() {
         try {
           this.restorePreferences();
-          const [stats] = await Promise.all([
+          const [stats, health] = await Promise.all([
             this.api('/api/stats'),
             this.api('/api/health')
           ]);
           this.stats = stats;
+          this.health = health;
           await this.search(1);
           this.ready = true;
         } catch (error) {
@@ -385,6 +396,7 @@ window.startLocalHub = function startLocalHub() {
 
         try {
           this.selected = await this.api(`/api/items/${encodeURIComponent(contentId)}`);
+          if (this.selected?.hasCoordinates) void this.loadWeather();
         } catch (error) {
           this.error = error.message;
         } finally {
@@ -571,15 +583,16 @@ window.startLocalHub = function startLocalHub() {
           <section class="hero">
             <div class="hero-inner">
               <div class="hero-copy">
-                <p class="eyebrow">지방에 계신 부모님을 위한 서울 통합 안내</p>
-                <h1>낯선 서울에서도<br><em>찾고, 보고, 날씨까지</em> 한 번에</h1>
+                <p class="eyebrow">노년의 부모님 두 분을 위한 서울 여행 안내</p>
+                <h1>두 분의 속도에 맞춰<br><em>편안하고 든든한</em> 서울 나들이</h1>
                 <p class="hero-description">
-                  관광지·문화시설·축제·여행코스·레포츠·숙박·쇼핑 정보를
-                  큰 글씨와 쉬운 버튼으로 확인할 수 있습니다.
+                  복잡한 정보는 줄이고 꼭 필요한 장소·지도·날씨를 큰 글씨로 안내합니다.
+                  천천히 살펴보고 마음에 드는 곳을 두 분만의 여행으로 담아보세요.
                 </p>
                 <div class="hero-trust">
                   <span>✓ 한국관광공사 TourAPI 원본</span>
-                  <span>✓ 기상청 실시간 관측</span>
+                  <span>{{ health?.weatherConfigured ? '✓ 기상청 날씨 연결됨' : '△ 날씨 설정 확인 필요' }}</span>
+                  <span>{{ health?.openAIConfigured ? '✓ AI 여행 안내 연결됨' : '✓ 관광 데이터 안내 사용 중' }}</span>
                   <span>✓ OpenStreetMap 지도</span>
                 </div>
               </div>
@@ -587,9 +600,9 @@ window.startLocalHub = function startLocalHub() {
               <aside class="hero-guide" aria-label="이용 방법">
                 <h2>이용 방법</h2>
                 <ol>
-                  <li><strong>1</strong><span>장소나 지역을 입력하세요.</span></li>
-                  <li><strong>2</strong><span>검색 결과에서 상세정보를 누르세요.</span></li>
-                  <li><strong>3</strong><span>지도와 현재 날씨를 확인하세요.</span></li>
+                  <li><strong>1</strong><span>가고 싶은 지역이나 장소를 찾아보세요.</span></li>
+                  <li><strong>2</strong><span>별표로 두 분의 후보 장소를 모아보세요.</span></li>
+                  <li><strong>3</strong><span>출발 전 지도와 날씨를 꼭 확인하세요.</span></li>
                 </ol>
               </aside>
             </div>
@@ -904,26 +917,30 @@ window.startLocalHub = function startLocalHub() {
             </svg>
             <span class="chat-online-dot"></span>
           </span>
-          <span class="chat-launcher-label"><strong>스마트 안내견</strong><small>무엇이든 물어보세요</small></span>
+          <span class="chat-launcher-label"><strong>서울 나들이 도우미</strong><small>두 분의 여행을 물어보세요</small></span>
         </button>
 
         <section v-if="chatOpen" id="tour-chat" class="chat-panel" aria-label="스마트 관광 안내 챗봇">
           <header class="chat-header">
             <span class="chat-header-dog" aria-hidden="true">🐶</span>
-            <div><strong>LocalHub 스마트 안내견</strong><small>무료 · 관광지 원본 · 실제 날씨 기반</small></div>
+            <div>
+              <strong>LocalHub 서울 나들이 도우미</strong>
+              <small>{{ health?.openAIConfigured ? 'AI · 관광지 원본 · 실제 날씨 기반' : '관광지 원본 기반 안전 안내' }}</small>
+            </div>
             <button type="button" aria-label="챗봇 닫기" @click="chatOpen = false">×</button>
           </header>
           <div ref="chatMessages" class="chat-messages" aria-live="polite">
             <article v-for="(row, index) in chatMessages" :key="index" class="chat-message" :class="row.role">
-              <span>{{ row.role === 'assistant' ? '스마트 안내견' : '나' }}</span>
+              <span>{{ row.role === 'assistant' ? '서울 나들이 도우미' : '나' }}</span>
               <p>{{ chatDisplayText(row.content) }}</p>
+              <small v-if="row.fallbackReason" class="chat-mode-notice">{{ row.fallbackReason }}</small>
               <div v-if="row.places?.length" class="chat-place-links">
                 <button v-for="place in row.places" :key="place.contentid" type="button" @click="openDetail(place.contentid)">
                   {{ place.이름 }} 상세보기
                 </button>
               </div>
             </article>
-            <article v-if="chatBusy" class="chat-message assistant"><span>스마트 안내견</span><p>멍! 알맞은 장소를 찾고 있어요…</p></article>
+            <article v-if="chatBusy" class="chat-message assistant"><span>서울 나들이 도우미</span><p>두 분께 알맞은 장소와 날씨를 살펴보고 있습니다…</p></article>
           </div>
           <div v-if="chatMessages.length === 1" class="chat-suggestions">
             <button v-for="suggestion in chatSuggestions" :key="suggestion" type="button" @click="askSuggestion(suggestion)">{{ suggestion }}</button>
@@ -931,17 +948,17 @@ window.startLocalHub = function startLocalHub() {
           <p v-if="chatError" class="chat-error" role="alert">{{ chatError }}</p>
           <form class="chat-form" @submit.prevent="sendChat">
             <label class="sr-only" for="chat-input">관광 안내 질문</label>
-            <input id="chat-input" v-model="chatInput" maxlength="1000" placeholder="예: 비 오는 날 종로 실내 여행지 추천" :disabled="chatBusy">
+            <input id="chat-input" v-model="chatInput" maxlength="1000" placeholder="예: 많이 걷지 않는 종로 실내 나들이" :disabled="chatBusy">
             <button type="submit" :disabled="chatBusy || !chatInput.trim()">보내기</button>
           </form>
-          <small class="chat-disclaimer">원본 데이터에 없는 운영시간·요금은 방문 전 확인하세요.</small>
+          <small class="chat-disclaimer">운영시간·요금·무장애 시설은 방문 전에 해당 장소에 확인해 주세요.</small>
         </section>
 
         <footer class="site-footer">
           <div class="footer-inner">
             <div>
               <strong>LocalHub 서울안내</strong>
-              <p>지방에 계신 부모님도 편안하게 서울을 둘러보실 수 있도록 돕는 정보 서비스입니다.</p>
+              <p>노년의 부모님 두 분이 스스로 편안하게 서울을 둘러보실 수 있도록 돕는 정보 서비스입니다.</p>
             </div>
             <div class="source-list">
               <span>관광정보: 한국관광공사 TourAPI 4.0 · 공공누리 제3유형</span>
@@ -984,7 +1001,7 @@ window.startLocalHub = function startLocalHub() {
 
                 <div class="detail-action-grid">
                   <button class="button button-primary" type="button" @click="loadWeather" :disabled="weatherBusy || !selected.hasCoordinates">
-                    {{ weatherBusy ? '날씨 조회 중…' : '현재 날씨 확인' }}
+                    {{ weatherBusy ? '날씨를 확인하고 있습니다…' : '날씨 다시 확인' }}
                   </button>
                   <a
                     v-if="selected.hasCoordinates"
@@ -1007,7 +1024,7 @@ window.startLocalHub = function startLocalHub() {
                 <section v-if="weather" class="weather-panel" aria-labelledby="weather-heading">
                   <div class="weather-heading">
                     <div>
-                      <p class="eyebrow">기상청 실시간 관측</p>
+                      <p class="eyebrow">출발 전 확인 · 기상청 관측</p>
                       <h3 id="weather-heading">{{ selected.title }} 날씨</h3>
                       <span>{{ weather.observedAt }} 발표 · 격자 {{ weather.grid.nx }}, {{ weather.grid.ny }}</span>
                     </div>
