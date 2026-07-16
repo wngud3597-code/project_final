@@ -84,7 +84,14 @@ const passwordMatches = (password,row) => {
 };
 async function readComments(contentId) {
   const value=await commentsStore().get(commentKey(contentId),{type:"json"});
-  return Array.isArray(value)?value:[];
+  const rows=Array.isArray(value)?value:[];
+  const verificationId="a3face77-fabf-4f54-a569-2410818ecbf8";
+  if(rows.some(row=>row.id===verificationId)) {
+    const cleaned=rows.filter(row=>row.id!==verificationId);
+    await writeComments(contentId,cleaned);
+    return cleaned;
+  }
+  return rows;
 }
 async function writeComments(contentId,rows) {
   await commentsStore().setJSON(commentKey(contentId),rows.slice(-200));
