@@ -1,3 +1,5 @@
+# Local environment variables (contains API keys) — do NOT commit
+# Example: copy backend/.env.example -> backend/.env and add keys locally
 backend/.env
 __pycache__/
 *.pyc
