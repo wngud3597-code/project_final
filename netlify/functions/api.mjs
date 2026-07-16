@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
-import { getStore } from "@netlify/blobs";
+import { connectLambda, getStore } from "@netlify/blobs";
 
 const CATEGORIES = ["관광지", "문화시설", "축제공연행사", "여행코스", "레포츠", "숙박", "쇼핑"];
 const CATEGORY_HINTS = {
@@ -294,6 +294,7 @@ async function weather(latitude,longitude) {
 
 export async function handler(event) {
   try {
+    if (event.blobs) connectLambda(event);
     const suffix = event.path.replace(/^.*\/api\/?/, ""); const url = new URL(event.rawUrl || `https://local.invalid/?${event.rawQuery||""}`);
     if(suffix==="comments"||suffix.startsWith("comments/")) return await handleComments(event,suffix,url);
     if (event.httpMethod === "POST" && suffix === "chat") {
