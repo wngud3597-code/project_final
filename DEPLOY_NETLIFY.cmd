@@ -20,6 +20,7 @@ if not exist "frontend\index.html" goto missing_file
 if not exist "frontend\app.js" goto missing_file
 if not exist "frontend\styles.css" goto missing_file
 if not exist "scripts\verify-netlify.mjs" goto missing_file
+if not exist "scripts\verify-live.mjs" goto missing_file
 for %%F in (data\*.json) do set /a DATA_COUNT+=1
 if not "%DATA_COUNT%"=="7" goto bad_data
 
@@ -74,7 +75,7 @@ goto deployed
 echo.
 echo ==================================================
 echo Deployment completed.
-echo Open the URL printed above and verify /api/health.
+echo Run: node scripts\verify-live.mjs https://YOUR-SITE.netlify.app
 echo ==================================================
 echo.
 pause
