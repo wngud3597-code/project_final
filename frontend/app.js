@@ -598,6 +598,15 @@ window.startLocalHub = function startLocalHub() {
               </div>
 
               <aside class="hero-guide" aria-label="이용 방법">
+                <div class="hero-postcard" aria-hidden="true">
+                  <span class="hero-sun"></span>
+                  <span class="hero-hill hill-back"></span>
+                  <span class="hero-hill hill-front"></span>
+                  <span class="hero-city city-one"></span>
+                  <span class="hero-city city-two"></span>
+                  <span class="hero-route"></span>
+                  <span class="hero-couple">두 분의 서울 나들이</span>
+                </div>
                 <h2>이용 방법</h2>
                 <ol>
                   <li><strong>1</strong><span>가고 싶은 지역이나 장소를 찾아보세요.</span></li>

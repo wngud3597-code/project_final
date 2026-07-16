@@ -86,7 +86,7 @@
       ]);
 
       if (help) help.textContent = 'LocalHub 화면을 시작하는 중입니다.';
-      await loadScript('/app.js?v=20260716-senior-couple-1');
+      await loadScript('/app.js?v=20260716-warm-journey-2');
 
       if (typeof window.startLocalHub !== 'function') {
         throw new Error('Vue 3 앱 시작 함수를 찾을 수 없습니다.');

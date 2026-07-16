@@ -13,7 +13,7 @@
 
 다른 사람은 명령 프롬프트 없이 배포된 웹주소만 열어 사용할 수 있습니다. Netlify용 Vue 정적 화면과 서버리스 API 구성이 포함되어 있습니다. 자세한 절차는 [`NETLIFY_DEPLOY.md`](NETLIFY_DEPLOY.md)를 확인하세요.
 
-운영 주소: <https://stately-begonia-1aaa4b.netlify.app>
+운영 주소: <https://localhub-seoul-guide-20260715.netlify.app>
 
 ## 바로 실행
 

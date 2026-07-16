@@ -5,7 +5,7 @@
 ## 현재 운영 주소
 
 ```text
-https://stately-begonia-1aaa4b.netlify.app
+https://localhub-seoul-guide-20260715.netlify.app
 ```
 
 공개 페이지, 관광 데이터 6,518건, 조건 검색, 상세정보 API, 기상청 날씨와 안전한 챗봇 대체 모드의 외부 접속을 검증합니다.
