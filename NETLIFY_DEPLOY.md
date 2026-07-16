@@ -14,6 +14,7 @@ https://localhub-seoul-guide-20260715.netlify.app
 
 - `frontend/`: Vue 3 화면
 - `netlify/functions/api.mjs`: 검색, 상세정보, 지도, 기상청 날씨, OpenAI 및 안전 대체 챗봇 API
+- `@netlify/blobs`: 장소별 커뮤니티 댓글 영구 저장
 - `data/`: 한국관광공사 원본 데이터 6,518건
 - `netlify.toml`: 배포 폴더, API 연결, 보안·캐시 설정
 
@@ -67,6 +68,7 @@ GitHub 연결 방식에서는 수정한 파일을 저장소에 push하면 Netlif
 https://사이트이름.netlify.app/
 https://사이트이름.netlify.app/api/health
 https://사이트이름.netlify.app/api/stats
+https://사이트이름.netlify.app/api/comments?contentid=장소ID
 ```
 
 `/api/health` 응답의 `status`가 `ok`, `loadedItems`가 `6518`, `weatherConfigured`가 `true`이면 날씨가 정상입니다. OpenAI까지 연결하려면 `openAIConfigured`가 `true`, `chatMode`가 `openai`여야 합니다.

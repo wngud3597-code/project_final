@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { getStore } from "@netlify/blobs";
 
 const CATEGORIES = ["관광지", "문화시설", "축제공연행사", "여행코스", "레포츠", "숙박", "쇼핑"];
 const CATEGORY_HINTS = {
@@ -71,6 +73,58 @@ function response(statusCode, body) {
 }
 const openAIConfigured = () => Boolean(String(process.env.OPENAI_API_KEY || "").trim());
 const openAIModel = () => String(process.env.OPENAI_MODEL || "gpt-5.6-luna").trim();
+const commentsStore = () => getStore("localhub-place-comments");
+const commentKey = contentId => `place-${String(contentId).replace(/[^0-9A-Za-z_-]/g, "")}`;
+const publicComment = row => ({id:row.id,contentid:row.contentid,author:row.author,text:row.text,createdAt:row.createdAt,updatedAt:row.updatedAt||null});
+const passwordDigest = (password,salt) => scryptSync(password,salt,32).toString("hex");
+const passwordMatches = (password,row) => {
+  if(!row?.passwordHash||!row?.passwordSalt) return false;
+  const expected=Buffer.from(row.passwordHash,"hex"), actual=Buffer.from(passwordDigest(password,row.passwordSalt),"hex");
+  return expected.length===actual.length&&timingSafeEqual(expected,actual);
+};
+async function readComments(contentId) {
+  const value=await commentsStore().get(commentKey(contentId),{type:"json",consistency:"strong"});
+  return Array.isArray(value)?value:[];
+}
+async function writeComments(contentId,rows) {
+  await commentsStore().setJSON(commentKey(contentId),rows.slice(-200));
+}
+function validateCommentInput(body,{editing=false}={}) {
+  const contentid=String(body.contentid||"").trim(), author=String(body.author||"").trim(), text=String(body.text||"").trim(), password=String(body.password||"");
+  if(!contentid||!loadStore().byId.has(contentid)) throw new Error("댓글을 남길 장소를 찾을 수 없습니다.");
+  if(!editing&&(author.length<2||author.length>30)) throw new Error("작성자 이름은 2~30자로 입력해 주세요.");
+  if(text.length<2||text.length>500) throw new Error("댓글은 2~500자로 입력해 주세요.");
+  if(password.length<4||password.length>50) throw new Error("비밀번호는 4~50자로 입력해 주세요.");
+  return {contentid,author,text,password};
+}
+async function handleComments(event,suffix,url) {
+  const method=event.httpMethod, id=suffix.startsWith("comments/")?decodeURIComponent(suffix.slice(9)):"";
+  if(method==="GET"&&suffix==="comments") {
+    const contentid=String(url.searchParams.get("contentid")||"").trim();
+    if(!contentid) return response(400,{error:"contentid가 필요합니다."});
+    const rows=await readComments(contentid);
+    return response(200,{items:rows.map(publicComment),count:rows.length,persistence:"netlify-blobs"});
+  }
+  const body=JSON.parse(event.body||"{}");
+  if(method==="POST"&&suffix==="comments") {
+    const value=validateCommentInput(body), rows=await readComments(value.contentid), salt=randomBytes(16).toString("hex"), now=new Date().toISOString();
+    const row={id:randomUUID(),contentid:value.contentid,author:value.author,text:value.text,createdAt:now,updatedAt:null,passwordSalt:salt,passwordHash:passwordDigest(value.password,salt)};
+    rows.push(row); await writeComments(value.contentid,rows);
+    return response(201,{item:publicComment(row),count:rows.length});
+  }
+  if((method==="PUT"||method==="DELETE")&&id) {
+    const contentid=String(body.contentid||url.searchParams.get("contentid")||"").trim(), password=String(body.password||"");
+    if(!contentid) return response(400,{error:"contentid가 필요합니다."});
+    const rows=await readComments(contentid), index=rows.findIndex(row=>row.id===id);
+    if(index<0) return response(404,{error:"댓글을 찾을 수 없습니다."});
+    if(!passwordMatches(password,rows[index])) return response(403,{error:"비밀번호가 맞지 않습니다."});
+    if(method==="DELETE") { rows.splice(index,1); await writeComments(contentid,rows); return response(200,{deleted:true,count:rows.length}); }
+    const value=validateCommentInput({...body,contentid},{editing:true});
+    rows[index]={...rows[index],text:value.text,updatedAt:new Date().toISOString()}; await writeComments(contentid,rows);
+    return response(200,{item:publicComment(rows[index]),count:rows.length});
+  }
+  return response(405,{error:"지원하지 않는 댓글 요청입니다."});
+}
 function integer(value, fallback, min, max) {
   const parsed = Number.parseInt(value, 10); return Math.min(max, Math.max(min, Number.isFinite(parsed) ? parsed : fallback));
 }
@@ -241,6 +295,7 @@ async function weather(latitude,longitude) {
 export async function handler(event) {
   try {
     const suffix = event.path.replace(/^.*\/api\/?/, ""); const url = new URL(event.rawUrl || `https://local.invalid/?${event.rawQuery||""}`);
+    if(suffix==="comments"||suffix.startsWith("comments/")) return await handleComments(event,suffix,url);
     if (event.httpMethod === "POST" && suffix === "chat") {
       const body=JSON.parse(event.body||"{}"); const message=String(body.message||"").trim();
       if(!message || message.length>1000) return response(400,{error:"질문은 1~1,000자로 입력해 주세요."});

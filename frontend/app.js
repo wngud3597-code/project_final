@@ -58,6 +58,13 @@ window.startLocalHub = function startLocalHub() {
         bookmarks: [],
         savedItems: [],
         savedBusy: false,
+        comments: [],
+        commentsBusy: false,
+        commentSaving: false,
+        commentError: '',
+        commentEditingId: null,
+        showCommentPassword: false,
+        commentForm: { author: '', text: '', password: '' },
         fieldOrder: FIELD_ORDER,
         categoryClassMap: CATEGORY_CLASS,
         imageFailures: {},
@@ -397,6 +404,7 @@ window.startLocalHub = function startLocalHub() {
         try {
           this.selected = await this.api(`/api/items/${encodeURIComponent(contentId)}`);
           if (this.selected?.hasCoordinates) void this.loadWeather();
+          void this.loadComments();
         } catch (error) {
           this.error = error.message;
         } finally {
@@ -408,6 +416,9 @@ window.startLocalHub = function startLocalHub() {
         this.selected = null;
         this.weather = null;
         this.weatherError = '';
+        this.comments = [];
+        this.commentError = '';
+        this.cancelCommentEdit();
       },
 
       async loadWeather() {
@@ -432,6 +443,84 @@ window.startLocalHub = function startLocalHub() {
         } finally {
           this.weatherBusy = false;
         }
+      },
+
+      async loadComments() {
+        if (!this.selected?.contentid) return;
+        this.commentsBusy = true;
+        this.commentError = '';
+        try {
+          const data = await this.api(`/api/comments?contentid=${encodeURIComponent(this.selected.contentid)}`);
+          this.comments = data.items || [];
+        } catch (error) {
+          this.commentError = error.message;
+        } finally {
+          this.commentsBusy = false;
+        }
+      },
+
+      async saveComment() {
+        if (!this.selected?.contentid || this.commentSaving) return;
+        this.commentSaving = true;
+        this.commentError = '';
+        const editing = Boolean(this.commentEditingId);
+        const path = editing ? `/api/comments/${encodeURIComponent(this.commentEditingId)}` : '/api/comments';
+        try {
+          const response = await fetch(path, {
+            method: editing ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ contentid: this.selected.contentid, ...this.commentForm })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+          this.commentForm = { author: '', text: '', password: '' };
+          this.commentEditingId = null;
+          this.showCommentPassword = false;
+          await this.loadComments();
+        } catch (error) {
+          this.commentError = error.message;
+        } finally {
+          this.commentSaving = false;
+        }
+      },
+
+      startCommentEdit(comment) {
+        this.commentEditingId = comment.id;
+        this.commentForm = { author: comment.author, text: comment.text, password: '' };
+        this.commentError = '';
+      },
+
+      cancelCommentEdit() {
+        this.commentEditingId = null;
+        this.commentForm = { author: '', text: '', password: '' };
+        this.showCommentPassword = false;
+      },
+
+      async deleteComment(comment) {
+        const password = window.prompt('댓글을 삭제하려면 작성할 때 사용한 비밀번호를 입력하세요.');
+        if (password === null) return;
+        if (password.length < 4) {
+          this.commentError = '비밀번호는 4자 이상 입력해 주세요.';
+          return;
+        }
+        this.commentError = '';
+        try {
+          const response = await fetch(`/api/comments/${encodeURIComponent(comment.id)}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ contentid: this.selected.contentid, password })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+          await this.loadComments();
+        } catch (error) {
+          this.commentError = error.message;
+        }
+      },
+
+      formatCommentDate(value) {
+        if (!value) return '';
+        return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
       },
 
       toggleBookmark(contentId) {
@@ -1058,6 +1147,77 @@ window.startLocalHub = function startLocalHub() {
                     </article>
                   </div>
                 </section>
+              </section>
+
+              <section class="community-section" aria-labelledby="community-heading">
+                <div class="community-heading">
+                  <div>
+                    <p class="eyebrow">장소 이야기</p>
+                    <h3 id="community-heading">이 장소에 대한 의견을 나눠보세요</h3>
+                    <p>방문 경험이나 부모님께 도움이 될 정보를 남길 수 있습니다.</p>
+                  </div>
+                  <div class="community-summary">
+                    <span>댓글 {{ comments.length }}개</span>
+                    <button class="button button-secondary" type="button" @click="toggleBookmark(selected.contentid)">
+                      {{ isBookmarked(selected.contentid) ? '★ 찜한 장소' : '☆ 찜하기' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="commentsBusy" class="comment-status" role="status">
+                  <span class="spinner"></span> 댓글을 불러오는 중입니다.
+                </div>
+                <div v-else-if="comments.length" class="comment-list">
+                  <article v-for="comment in comments" :key="comment.id" class="comment-card">
+                    <header>
+                      <strong>{{ comment.author }}</strong>
+                      <time :datetime="comment.updatedAt || comment.createdAt">
+                        {{ formatCommentDate(comment.updatedAt || comment.createdAt) }}{{ comment.updatedAt ? ' · 수정됨' : '' }}
+                      </time>
+                    </header>
+                    <p>{{ comment.text }}</p>
+                    <div class="comment-actions">
+                      <button type="button" @click="startCommentEdit(comment)">수정</button>
+                      <button type="button" @click="deleteComment(comment)">삭제</button>
+                    </div>
+                  </article>
+                </div>
+                <div v-else class="comment-empty">
+                  <strong>아직 등록된 댓글이 없습니다.</strong>
+                  <span>첫 번째 장소 이야기를 남겨보세요.</span>
+                </div>
+
+                <p v-if="commentError" class="comment-error" role="alert">{{ commentError }}</p>
+                <form class="comment-form" @submit.prevent="saveComment">
+                  <div class="comment-form-heading">
+                    <strong>{{ commentEditingId ? '댓글 수정' : '댓글 작성' }}</strong>
+                    <button v-if="commentEditingId" type="button" @click="cancelCommentEdit">수정 취소</button>
+                  </div>
+                  <label>
+                    <span>작성자</span>
+                    <input v-model.trim="commentForm.author" maxlength="30" required :disabled="Boolean(commentEditingId)" placeholder="이름 또는 별명">
+                  </label>
+                  <label>
+                    <span>댓글</span>
+                    <textarea v-model.trim="commentForm.text" minlength="2" maxlength="500" required placeholder="이 장소에 대한 경험이나 도움이 될 정보를 남겨주세요."></textarea>
+                    <small>{{ commentForm.text.length }} / 500자</small>
+                  </label>
+                  <label>
+                    <span>비밀번호</span>
+                    <div class="comment-password-row">
+                      <input v-model="commentForm.password" :type="showCommentPassword ? 'text' : 'password'" minlength="4" maxlength="50" required autocomplete="new-password" placeholder="수정·삭제할 때 사용합니다">
+                      <button type="button" :aria-pressed="showCommentPassword" @click="showCommentPassword = !showCommentPassword">
+                        {{ showCommentPassword ? '숨기기' : '보기' }}
+                      </button>
+                    </div>
+                  </label>
+                  <div class="comment-form-footer">
+                    <small>비밀번호는 암호화해 저장하며 화면에 표시하지 않습니다.</small>
+                    <button class="button button-primary" type="submit" :disabled="commentSaving">
+                      {{ commentSaving ? '저장 중…' : (commentEditingId ? '수정 저장' : '댓글 등록') }}
+                    </button>
+                  </div>
+                </form>
               </section>
 
               <section class="raw-data-section" aria-labelledby="raw-data-heading">

@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from data_store import TourismStore
 from weather_service import WeatherError, WeatherService, load_env
 from chat_service import ChatError, TourismChatService
+from comment_store import CommentStore
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +30,7 @@ PORT = int(env.get("PORT", "8000"))
 STORE = TourismStore(DATA_DIR)
 WEATHER = WeatherService(BACKEND / ".env")
 CHAT = TourismChatService(BACKEND / ".env", STORE, WEATHER)
+COMMENTS = CommentStore(BACKEND / "comments.local.json")
 
 
 def one(params: dict[str, list[str]], key: str, default: str = "") -> str:
@@ -155,6 +157,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(200, {"items": STORE.get_many(ids[:200])})
                 return
 
+            if path == "/api/comments":
+                contentid = one(params, "contentid").strip()
+                if not contentid:
+                    self.json_response(400, {"error": "contentid가 필요합니다."})
+                else:
+                    items = COMMENTS.list(contentid)
+                    self.json_response(200, {"items": items, "count": len(items), "persistence": "local-json"})
+                return
+
             if path.startswith("/api/items/"):
                 content_id = path.removeprefix("/api/items/").strip("/")
                 item = STORE.get(content_id)
@@ -224,6 +235,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/comments":
+            try:
+                payload = self.read_json_body()
+                contentid = str(payload.get("contentid", "")).strip()
+                author = str(payload.get("author", "")).strip()
+                text = str(payload.get("text", "")).strip()
+                password = str(payload.get("password", ""))
+                if not STORE.get(contentid):
+                    raise ValueError("댓글을 남길 장소를 찾을 수 없습니다.")
+                if not 2 <= len(author) <= 30 or not 2 <= len(text) <= 500 or not 4 <= len(password) <= 50:
+                    raise ValueError("작성자 2~30자, 댓글 2~500자, 비밀번호 4~50자로 입력해 주세요.")
+                item = COMMENTS.create(contentid, author, text, password)
+                self.json_response(201, {"item": item})
+            except (ValueError, json.JSONDecodeError) as exc:
+                self.json_response(400, {"error": str(exc)})
+            return
         if parsed.path != "/api/chat":
             self.json_response(404, {"error": "API 경로를 찾을 수 없습니다."})
             return
@@ -244,6 +271,35 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             traceback.print_exc()
             self.json_response(500, {"error": f"서버 오류: {exc}"})
+
+    def _change_comment(self, delete: bool = False) -> None:
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/api/comments/"):
+            self.json_response(404, {"error": "API 경로를 찾을 수 없습니다."})
+            return
+        try:
+            payload = self.read_json_body()
+            comment_id = parsed.path.removeprefix("/api/comments/").strip("/")
+            contentid = str(payload.get("contentid", "")).strip()
+            password = str(payload.get("password", ""))
+            text = str(payload.get("text", "")).strip()
+            if not contentid or len(password) < 4 or (not delete and not 2 <= len(text) <= 500):
+                raise ValueError("댓글 정보와 비밀번호를 올바르게 입력해 주세요.")
+            item = COMMENTS.change(comment_id, contentid, password, text=text, delete=delete)
+            if item is None:
+                self.json_response(404, {"error": "댓글을 찾을 수 없습니다."})
+            else:
+                self.json_response(200, item if delete else {"item": item})
+        except PermissionError as exc:
+            self.json_response(403, {"error": str(exc)})
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.json_response(400, {"error": str(exc)})
+
+    def do_PUT(self) -> None:
+        self._change_comment(delete=False)
+
+    def do_DELETE(self) -> None:
+        self._change_comment(delete=True)
 
 
 def open_browser() -> None:

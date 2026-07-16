@@ -12,3 +12,4 @@ __pycache__/
 node_modules/
 .netlify/
 npm-debug.log*
+backend/comments.local.json
