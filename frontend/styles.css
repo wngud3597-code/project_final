@@ -427,18 +427,6 @@ img {
   transform: rotate(-3deg);
 }
 
-.hero-couple {
-  position: absolute;
-  left: 18px;
-  top: 16px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 254, 250, 0.86);
-  color: #476655;
-  font-size: 0.72rem;
-  font-weight: 900;
-}
-
 .hero-guide h2 {
   margin: 0 0 18px;
   font-size: 1.2rem;
