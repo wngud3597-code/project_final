@@ -1218,7 +1218,7 @@ window.startLocalHub = function startLocalHub() {
                     </div>
                   </label>
                   <div class="comment-form-footer">
-                    <small>비밀번호는 암호화해 저장하며 화면에 표시하지 않습니다.</small>
+                    <small>비밀번호는 암호화해 저장합니다. 등록 직후 수정·삭제는 저장 반영까지 잠시 기다려 주세요.</small>
                     <button class="button button-primary" type="submit" :disabled="commentSaving">
                       {{ commentSaving ? '저장 중…' : (commentEditingId ? '수정 저장' : '댓글 등록') }}
                     </button>
