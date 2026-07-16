@@ -83,7 +83,7 @@ const passwordMatches = (password,row) => {
   return expected.length===actual.length&&timingSafeEqual(expected,actual);
 };
 async function readComments(contentId) {
-  const value=await commentsStore().get(commentKey(contentId),{type:"json",consistency:"strong"});
+  const value=await commentsStore().get(commentKey(contentId),{type:"json"});
   return Array.isArray(value)?value:[];
 }
 async function writeComments(contentId,rows) {

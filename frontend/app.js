@@ -473,10 +473,15 @@ window.startLocalHub = function startLocalHub() {
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+          if (payload.item) {
+            const index = this.comments.findIndex(comment => comment.id === payload.item.id);
+            if (index >= 0) this.comments.splice(index, 1, payload.item);
+            else this.comments.push(payload.item);
+          }
           this.commentForm = { author: '', text: '', password: '' };
           this.commentEditingId = null;
           this.showCommentPassword = false;
-          await this.loadComments();
+          setTimeout(() => this.loadComments(), 1200);
         } catch (error) {
           this.commentError = error.message;
         } finally {
@@ -512,7 +517,8 @@ window.startLocalHub = function startLocalHub() {
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-          await this.loadComments();
+          this.comments = this.comments.filter(row => row.id !== comment.id);
+          setTimeout(() => this.loadComments(), 1200);
         } catch (error) {
           this.commentError = error.message;
         }
